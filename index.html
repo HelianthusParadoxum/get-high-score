@@ -21,6 +21,7 @@
       user-select: none;
     }
 
+    /* HUD order: time -> shots -> kills -> score */
     .hud { display:flex; gap:10px; flex-wrap:wrap; margin: 10px 0 10px; align-items: center; }
     .pill {
       border: 1px solid #2a3a52;
@@ -41,21 +42,18 @@
       font-weight: 1000;
       letter-spacing: 0.4px;
       display: inline-block;
-      width: 5ch;
+      width: 5ch;       /* stable width: "30.0" */
       text-align: right;
     }
     .blinkRed { color: #ff6b6b; }
 
     .canvasWrap { position: relative; }
 
-    /* ✅ Responsive canvas:
-       - takes full available width
-       - keeps aspect ratio
-       - never overflows horizontally */
+    /* ✅ Responsive canvas */
     canvas {
       display: block;
       width: 100%;
-      height: auto;              /* preserve aspect ratio */
+      height: auto;              /* preserves aspect ratio */
       max-width: 100%;
       border-radius: 14px;
       border: 1px solid #233044;
@@ -63,12 +61,12 @@
       touch-action: none;        /* avoid page pan/zoom on touches */
     }
 
-    /* Minimal end panel */
+    /* Desktop overlay end panel */
     .endPanel {
       position: absolute;
       top: 12px;
       right: 12px;
-      width: min(300px, 80%);
+      width: min(300px, 44%);
       display: none;
       border: 1px solid #2a3a52;
       background: rgba(14, 21, 32, 0.92);
@@ -76,7 +74,20 @@
       padding: 12px;
       box-shadow: 0 10px 30px rgba(0,0,0,.45);
       backdrop-filter: blur(4px);
+      pointer-events: auto;
     }
+
+    /* Mobile end panel (below canvas) */
+    .endPanelMobile {
+      display: none;
+      margin-top: 10px;
+      border: 1px solid #2a3a52;
+      background: rgba(14, 21, 32, 0.92);
+      border-radius: 14px;
+      padding: 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.25);
+    }
+
     .endTitle { font-weight: 950; font-size: 14px; margin: 0 0 8px 0; color: #cfe3ff; }
     .endScoreBig {
       font-weight: 1000;
@@ -96,6 +107,12 @@
       font-weight: 900;
     }
     button:hover { filter: brightness(1.08); }
+
+    /* On small screens: do not overlay canvas with end panel */
+    @media (max-width: 640px) {
+      .endPanel { display: none !important; }
+      /* .endPanelMobile stays controlled by JS */
+    }
   </style>
 </head>
 <body>
@@ -117,15 +134,24 @@
       </div>
 
       <div class="canvasWrap">
-        <!-- ✅ Keep a fixed internal coordinate system for drawing -->
         <canvas id="c" width="760" height="440" aria-label="Game canvas"></canvas>
 
+        <!-- Desktop overlay -->
         <div class="endPanel" id="endPanel" aria-label="Game end panel">
           <div class="endTitle">Game End</div>
           <div class="endScoreBig"><span id="endScore">0</span>/<span>100</span></div>
           <div class="btnRow">
             <button id="restart">Restart</button>
           </div>
+        </div>
+      </div>
+
+      <!-- Mobile below-canvas panel -->
+      <div class="endPanelMobile" id="endPanelMobile" aria-label="Game end panel mobile">
+        <div class="endTitle">Game End</div>
+        <div class="endScoreBig"><span id="endScoreMobile">0</span>/<span>100</span></div>
+        <div class="btnRow">
+          <button id="restartMobile">Restart</button>
         </div>
       </div>
     </div>
@@ -164,12 +190,21 @@
 
   const endPanel = document.getElementById('endPanel');
   const endScore = document.getElementById('endScore');
+
+  const endPanelMobile = document.getElementById('endPanelMobile');
+  const endScoreMobile = document.getElementById('endScoreMobile');
+
   document.getElementById('restart').addEventListener('click', restart);
+  document.getElementById('restartMobile').addEventListener('click', restart);
+
+  function isMobileLayout() {
+    return window.matchMedia('(max-width: 640px)').matches;
+  }
 
   // ===== State =====
   let score = 0;
   let shots = 0;
-  let kills = 0; // per run
+  let kills = 0;
 
   let hp = MAX_HP;
   let monsterAlive = true;
@@ -186,7 +221,7 @@
   let hurtFlash = 0;
   let wobble = 0;
 
-  let monster = {
+  const monster = {
     x: canvas.width * 0.34,
     y: canvas.height * 0.56,
     r: 58
@@ -212,8 +247,7 @@
     elScore.textContent = String(Math.max(0, Math.min(100, score)));
   }
 
-  // ✅ Crucial for responsive canvas:
-  // map pointer coords into the fixed internal canvas coordinate system.
+  // Map client coords to fixed internal canvas coords
   function canvasPosFromClient(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
     const x = (clientX - rect.left) * (canvas.width / rect.width);
@@ -226,14 +260,30 @@
     return dist(px, py, monster.x, monster.y) <= monster.r;
   }
 
+  function showEndPanels() {
+    const s = Math.max(0, Math.min(100, score));
+    endScore.textContent = String(s);
+    endScoreMobile.textContent = String(s);
+
+    if (isMobileLayout()) {
+      endPanelMobile.style.display = "block";
+      endPanel.style.display = "none";
+    } else {
+      endPanel.style.display = "block";
+      endPanelMobile.style.display = "none";
+    }
+  }
+
   function showEndPanel() {
     if (gameEnded) return;
     gameEnded = true;
-    const s = Math.max(0, Math.min(100, score));
-    endScore.textContent = String(s);
-    endPanel.style.display = "block";
+    showEndPanels();
   }
-  function hideEndPanel() { endPanel.style.display = "none"; }
+
+  function hideEndPanel() {
+    endPanel.style.display = "none";
+    endPanelMobile.style.display = "none";
+  }
 
   // ===== Drawing =====
   function drawBackground() {
@@ -472,7 +522,6 @@
   function endByTime() {
     if (gameEnded) return;
     if (!monsterAlive) return;
-
     score = SURVIVAL_SCORE;
     monsterMode = "happy";
     showEndPanel();
@@ -543,7 +592,7 @@
     requestAnimationFrame(frame);
   }
 
-  // ===== Input (mouse) =====
+  // ===== Input =====
   canvas.addEventListener('mousemove', (e) => {
     const p = canvasPosFromClient(e.clientX, e.clientY);
     aim.x = p.x; aim.y = p.y; aim.inside = true;
@@ -552,7 +601,6 @@
   canvas.addEventListener('mouseleave', () => aim.inside = false);
   canvas.addEventListener('click', () => shoot());
 
-  // ===== Input (touch) =====
   canvas.addEventListener('touchstart', (e) => {
     e.preventDefault();
     const t = e.touches[0];
@@ -567,6 +615,11 @@
     const p = canvasPosFromClient(t.clientX, t.clientY);
     aim.x = p.x; aim.y = p.y; aim.inside = true;
   }, { passive: false });
+
+  // If orientation/layout changes, keep end UI consistent
+  window.addEventListener('resize', () => {
+    if (gameEnded) showEndPanels();
+  });
 
   // Start
   restart();
