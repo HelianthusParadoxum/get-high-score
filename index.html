@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Get High Score</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    body { margin: 0; background: #0b0f14; color: #e7edf6; }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 14px; }
+    .card { border: 1px solid #233044; border-radius: 14px; padding: 12px; background: #0e1520; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+
+    .top { display:flex; flex-direction: column; gap: 6px; }
+    h1 { font-size: 18px; margin: 0; font-weight: 950; letter-spacing: .2px; color: #cfe3ff; }
+
+    .shootLine {
+      font-weight: 950;
+      font-size: 20px;
+      letter-spacing: 0.2px;
+      color: #ff6b6b;
+      user-select: none;
+    }
+
+    .hud { display:flex; gap:10px; flex-wrap:wrap; margin: 10px 0 10px; align-items: center; }
+    .pill {
+      border: 1px solid #2a3a52;
+      border-radius: 999px;
+      padding: 8px 12px;
+      background: #0b111a;
+      font-size: 14px;
+      display: inline-flex;
+      align-items: baseline;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    .pill strong { font-weight: 950; }
+
+    .timerPill { border-width: 2px; }
+    .timerValue {
+      font-variant-numeric: tabular-nums;
+      font-weight: 1000;
+      letter-spacing: 0.4px;
+      display: inline-block;
+      width: 5ch;       /* stable width: "30.0" */
+      text-align: right;
+    }
+    .blinkRed { color: #ff6b6b; }
+
+    .row { display:flex; gap: 12px; flex-wrap: wrap; align-items: flex-start; }
+    canvas { border-radius: 14px; border: 1px solid #233044; background: #070a0f; touch-action: none; }
+
+    .side { flex: 1 1 320px; min-width: 260px; }
+    .panel { border: 1px solid #233044; border-radius: 14px; padding: 10px; background: #0b111a; color: #9fb2cc; font-size: 12px; line-height: 1.4; }
+    code { color:#cfe3ff; }
+
+    .canvasWrap { position: relative; }
+
+    .endPanel {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      width: min(300px, 44%);
+      display: none;
+      border: 1px solid #2a3a52;
+      background: rgba(14, 21, 32, 0.92);
+      border-radius: 14px;
+      padding: 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.45);
+      backdrop-filter: blur(4px);
+    }
+    .endTitle { font-weight: 950; font-size: 14px; margin: 0 0 8px 0; color: #cfe3ff; }
+    .endScoreBig {
+      font-weight: 1000;
+      font-size: 42px;
+      letter-spacing: 0.4px;
+      margin: 0 0 10px 0;
+      font-variant-numeric: tabular-nums;
+    }
+    .btnRow { display:flex; gap:10px; flex-wrap:wrap; margin-top: 4px; }
+    button {
+      border: 1px solid #2a3a52;
+      border-radius: 12px;
+      padding: 10px 12px;
+      background: #101a28;
+      color: #e7edf6;
+      cursor: pointer;
+      font-weight: 900;
+    }
+    button:hover { filter: brightness(1.08); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="top">
+        <h1>Get High Score</h1>
+        <div class="shootLine">Left Mouse Button — Shoot</div>
+      </div>
+
+      <div class="hud">
+        <div class="pill timerPill">
+          <strong>TIME LEFT:</strong>
+          <span id="timeLeft" class="timerValue">30.0</span><span>s</span>
+        </div>
+        <div class="pill"><strong>SHOTS:</strong> <span id="shots">0</span></div>
+        <div class="pill"><strong>KILLS:</strong> <span id="kills">0</span></div>
+        <div class="pill"><strong>SCORE:</strong> <span id="score">0</span>/<strong>100</strong></div>
+      </div>
+
+      <div class="row">
+        <div style="flex: 2 1 620px; min-width: 320px;">
+          <div class="canvasWrap">
+            <canvas id="c" width="760" height="440" aria-label="Game canvas"></canvas>
+
+            <div class="endPanel" id="endPanel" aria-label="Game end panel">
+              <div class="endTitle">Game End</div>
+              <div class="endScoreBig"><span id="endScore">0</span>/<span>100</span></div>
+              <div class="btnRow">
+                <button id="restart">Restart</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="side">
+          <div class="panel">
+            Save as <code>get-high-score.html</code> and open in a browser.
+            <div style="margin-top:8px;">
+              Touch: tap to shoot, drag to aim.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  // ===== Config =====
+  const MAX_HP = 3;
+  const POINTS_PER_SHOT = 1;
+
+  const TOTAL_SECONDS = 30;
+  const PANIC_SECONDS = 10;
+
+  const SURVIVAL_SCORE = 100;
+
+  // Sniper reticle config (purely visual)
+  const RETICLE = {
+    outerRadius: 56,
+    innerRadius: 14,
+    tickEveryDeg: 30,
+    longCrossLen: 180,
+    gapFromCenter: 10,
+    ringAlpha: 0.65,
+    lineAlpha: 0.85,
+    tickAlpha: 0.55,
+  };
+
+  // ===== DOM =====
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+
+  const elTimeLeft = document.getElementById('timeLeft');
+  const elShots = document.getElementById('shots');
+  const elKills = document.getElementById('kills');
+  const elScore = document.getElementById('score');
+
+  const endPanel = document.getElementById('endPanel');
+  const endScore = document.getElementById('endScore');
+  document.getElementById('restart').addEventListener('click', restart);
+
+  // ===== State =====
+  let score = 0;
+  let shots = 0;
+  let kills = 0; // per run (resets on restart)
+
+  let hp = MAX_HP;
+  let monsterAlive = true;
+
+  let elapsedMs = 0;
+  let lastT = performance.now();
+
+  let gameEnded = false;
+  let monsterMode = "masked"; // "masked" | "happy" | "dead"
+
+  // Aim / input
+  let aim = { x: canvas.width * 0.7, y: canvas.height * 0.5, inside: false };
+  let shotFlash = 0;
+  let hurtFlash = 0;
+  let wobble = 0;
+
+  const monster = {
+    x: canvas.width * 0.34,
+    y: canvas.height * 0.56,
+    r: 58
+  };
+
+  // ===== Helpers =====
+  function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
+  function dist(ax, ay, bx, by) { const dx=ax-bx, dy=ay-by; return Math.sqrt(dx*dx + dy*dy); }
+  function remainingMs() { return Math.max(0, TOTAL_SECONDS * 1000 - elapsedMs); }
+  function remainingSec() { return remainingMs() / 1000; }
+
+  function isBlinkPhase(tMs) {
+    return Math.floor(tMs / 125) % 2 === 0; // ~4Hz
+  }
+
+  function setHUD(nowMs) {
+    const left = remainingSec();
+    elTimeLeft.textContent = left.toFixed(1);
+
+    const inPanic = left <= PANIC_SECONDS && !gameEnded;
+    if (inPanic && isBlinkPhase(nowMs)) elTimeLeft.classList.add('blinkRed');
+    else elTimeLeft.classList.remove('blinkRed');
+
+    elShots.textContent = String(shots);
+    elKills.textContent = String(kills);
+    elScore.textContent = String(Math.max(0, Math.min(100, score)));
+  }
+
+  function canvasPosFromEvent(e) {
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+    return { x, y };
+  }
+
+  function isHitMonster(px, py) {
+    if (!monsterAlive) return false;
+    return dist(px, py, monster.x, monster.y) <= monster.r;
+  }
+
+  function showEndPanel() {
+    if (gameEnded) return;
+    gameEnded = true;
+
+    const s = Math.max(0, Math.min(100, score));
+    endScore.textContent = String(s);
+
+    endPanel.style.display = "block";
+  }
+
+  function hideEndPanel() {
+    endPanel.style.display = "none";
+  }
+
+  // ===== Drawing =====
+  function drawBackground() {
+    const g = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    g.addColorStop(0, '#070a0f');
+    g.addColorStop(1, '#0b1422');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.globalAlpha = 0.10;
+    ctx.strokeStyle = '#2a3a52';
+    ctx.lineWidth = 1;
+    const step = 40;
+    for (let x = 0; x < canvas.width; x += step) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+    }
+    for (let y = 0; y < canvas.height; y += step) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawSniperReticle() {
+    if (!aim.inside) return;
+
+    const hit = (!gameEnded) && isHitMonster(aim.x, aim.y);
+    const col = hit ? '#ff6b6b' : '#cfe3ff';
+
+    const { outerRadius, innerRadius, tickEveryDeg, longCrossLen, gapFromCenter } = RETICLE;
+
+    ctx.save();
+    ctx.translate(aim.x, aim.y);
+
+    // Long cross (very explicit)
+    ctx.globalAlpha = RETICLE.lineAlpha;
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 2;
+
+    ctx.beginPath();
+    // horizontal
+    ctx.moveTo(-longCrossLen, 0); ctx.lineTo(-gapFromCenter, 0);
+    ctx.moveTo(gapFromCenter, 0);  ctx.lineTo(longCrossLen, 0);
+    // vertical
+    ctx.moveTo(0, -longCrossLen); ctx.lineTo(0, -gapFromCenter);
+    ctx.moveTo(0, gapFromCenter);  ctx.lineTo(0, longCrossLen);
+    ctx.stroke();
+
+    // Outer ring
+    ctx.globalAlpha = RETICLE.ringAlpha;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, outerRadius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Inner ring (tight)
+    ctx.globalAlpha = 0.9;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, innerRadius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Ticks on outer ring
+    ctx.globalAlpha = RETICLE.tickAlpha;
+    ctx.lineWidth = 2;
+    for (let deg = 0; deg < 360; deg += tickEveryDeg) {
+      const a = deg * Math.PI / 180;
+      const r1 = outerRadius - 8;
+      const r2 = outerRadius + 2;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * r1, Math.sin(a) * r1);
+      ctx.lineTo(Math.cos(a) * r2, Math.sin(a) * r2);
+      ctx.stroke();
+    }
+
+    // Center dot
+    ctx.globalAlpha = 0.95;
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.arc(0, 0, 2.4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Shot flash ring
+    if (shotFlash > 0) {
+      const k = shotFlash / 140; // 0..1
+      ctx.globalAlpha = 0.35 * k;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, outerRadius + 16 * (1.2 - k), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  function drawMonster(dt) {
+    if (!monsterAlive) {
+      ctx.save();
+      ctx.globalAlpha = 0.18;
+      ctx.fillStyle = '#9fb2cc';
+      ctx.beginPath();
+      ctx.arc(monster.x, monster.y, monster.r * 0.62, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      return;
+    }
+
+    wobble += dt * 0.004;
+    const wob = Math.sin(wobble) * 3;
+
+    ctx.save();
+    ctx.translate(monster.x + wob, monster.y);
+
+    // shadow
+    ctx.globalAlpha = 0.20;
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.ellipse(0, monster.r * 0.95, monster.r * 0.9, monster.r * 0.28, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    const isHurt = hurtFlash > 0;
+    const base = isHurt ? '#ffb3b3' : '#8bd3ff';
+
+    // torso / shoulders
+    ctx.save();
+    ctx.globalAlpha = 0.95;
+    ctx.fillStyle = '#0b111a';
+    ctx.strokeStyle = '#233044';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.roundRect(-68, 34, 136, 62, 18);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = '#2a3a52';
+    ctx.beginPath();
+    ctx.roundRect(-40, 52, 80, 30, 14);
+    ctx.fill();
+    ctx.restore();
+
+    // helmet shell
+    ctx.fillStyle = base;
+    ctx.strokeStyle = '#233044';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, monster.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // helmet rim
+    ctx.fillStyle = '#0b111a';
+    ctx.globalAlpha = 0.92;
+    ctx.beginPath();
+    ctx.arc(0, 0, monster.r * 0.86, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    if (monsterMode === "masked") {
+      // visor slab
+      ctx.fillStyle = '#111c2b';
+      ctx.strokeStyle = '#2a3a52';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(-36, -18, 72, 36, 12);
+      ctx.fill();
+      ctx.stroke();
+
+      // visor slit
+      ctx.globalAlpha = 0.95;
+      ctx.fillStyle = '#070a0f';
+      ctx.beginPath();
+      ctx.roundRect(-28, -8, 56, 10, 6);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      // breathing grill
+      ctx.strokeStyle = '#2a3a52';
+      ctx.lineWidth = 2;
+      for (let i = -2; i <= 2; i++) {
+        ctx.beginPath();
+        ctx.moveTo(i * 8, 18);
+        ctx.lineTo(i * 8, 30);
+        ctx.stroke();
+      }
+
+      // side bolts
+      ctx.fillStyle = '#233044';
+      ctx.beginPath();
+      ctx.arc(-46, 2, 4, 0, Math.PI * 2);
+      ctx.arc(46, 2, 4, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (monsterMode === "happy") {
+      // visor lifted: friendly face inside
+      ctx.fillStyle = '#111c2b';
+      ctx.strokeStyle = '#2a3a52';
+      ctx.lineWidth = 2;
+
+      ctx.beginPath();
+      ctx.roundRect(-38, -34, 76, 18, 10);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#0b111a';
+      ctx.beginPath();
+      ctx.roundRect(-34, -16, 68, 48, 14);
+      ctx.fill();
+
+      ctx.fillStyle = '#e7edf6';
+      ctx.beginPath();
+      ctx.arc(-14, 4, 4.3, 0, Math.PI * 2);
+      ctx.arc(14, 4, 4.3, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = '#e7edf6';
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.arc(0, 18, 12, 0.15 * Math.PI, 0.85 * Math.PI);
+      ctx.stroke();
+    }
+
+    // HP pips
+    ctx.save();
+    ctx.globalAlpha = 0.95;
+    for (let i = 0; i < MAX_HP; i++) {
+      ctx.fillStyle = (hp > i) ? '#cfe3ff' : '#233044';
+      ctx.beginPath();
+      ctx.arc(-18 + i * 18, -monster.r - 20, 6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  // roundRect polyfill
+  if (!CanvasRenderingContext2D.prototype.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+      const rr = Math.min(r, w/2, h/2);
+      this.beginPath();
+      this.moveTo(x+rr, y);
+      this.arcTo(x+w, y, x+w, y+h, rr);
+      this.arcTo(x+w, y+h, x, y+h, rr);
+      this.arcTo(x, y+h, x, y, rr);
+      this.arcTo(x, y, x+w, y, rr);
+      this.closePath();
+      return this;
+    };
+  }
+
+  // ===== Logic =====
+  function endByTime() {
+    if (gameEnded) return;
+    if (!monsterAlive) return;
+
+    score = SURVIVAL_SCORE;
+    monsterMode = "happy";
+    showEndPanel();
+  }
+
+  function shoot() {
+    if (gameEnded) return;
+
+    shots += 1;
+    score += POINTS_PER_SHOT;
+    score = Math.min(100, score);
+    shotFlash = 140;
+
+    const hit = isHitMonster(aim.x, aim.y);
+    if (hit) {
+      hp = clamp(hp - 1, 0, MAX_HP);
+      hurtFlash = 140;
+
+      if (hp === 0) {
+        monsterAlive = false;
+        monsterMode = "dead";
+        kills += 1;
+        showEndPanel();
+        return;
+      }
+    }
+  }
+
+  function restart() {
+    score = 0;
+    shots = 0;
+    kills = 0; // reset between sessions (per run), as requested
+
+    hp = MAX_HP;
+    monsterAlive = true;
+
+    elapsedMs = 0;
+    lastT = performance.now();
+
+    gameEnded = false;
+    monsterMode = "masked";
+
+    shotFlash = 0;
+    hurtFlash = 0;
+    wobble = 0;
+
+    hideEndPanel();
+    setHUD(performance.now());
+  }
+
+  // ===== Loop =====
+  function frame(t) {
+    const dt = t - lastT;
+    lastT = t;
+
+    if (!gameEnded) {
+      elapsedMs += dt;
+      if (remainingMs() <= 0) endByTime();
+    }
+
+    if (hurtFlash > 0) hurtFlash = Math.max(0, hurtFlash - dt);
+    if (shotFlash > 0) shotFlash = Math.max(0, shotFlash - dt);
+
+    setHUD(t);
+
+    drawBackground();
+    drawMonster(dt);
+    drawSniperReticle();
+
+    requestAnimationFrame(frame);
+  }
+
+  // ===== Input =====
+  canvas.addEventListener('mousemove', (e) => {
+    const p = canvasPosFromEvent(e);
+    aim.x = p.x; aim.y = p.y; aim.inside = true;
+  });
+  canvas.addEventListener('mouseenter', () => aim.inside = true);
+  canvas.addEventListener('mouseleave', () => aim.inside = false);
+  canvas.addEventListener('click', () => shoot());
+
+  // Touch
+  canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const p = canvasPosFromEvent(touch);
+    aim.x = p.x; aim.y = p.y; aim.inside = true;
+    shoot();
+  }, { passive: false });
+
+  canvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const p = canvasPosFromEvent(touch);
+    aim.x = p.x; aim.y = p.y; aim.inside = true;
+  }, { passive: false });
+
+  // Start
+  restart();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
